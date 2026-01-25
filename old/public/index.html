@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingView Alerts</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>TradingView Alerts</h1>
+    <table id="alertsTable">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Message</th>
+                <th>Price</th>
+                <th>Timestamp</th>
+                <th>Full Object</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Data will be populated here -->
+        </tbody>
+    </table>
+
+    <script>
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/webhook');
+                const alerts = await response.json();
+                const tbody = document.querySelector('#alertsTable tbody');
+                tbody.innerHTML = '';
+                alerts.forEach(alert => {
+                    const color = alert.message && alert.message.includes('LONG') ? '#98FB98' : alert.message && alert.message.includes('SHORT') ? '#CD5C5C' : 'white';
+                    const row = document.createElement('tr');
+                    row.style.backgroundColor = color;
+                    row.innerHTML = `
+                        <td>${alert.symbol || 'N/A'}</td>
+                        <td>${alert.message || 'N/A'}</td>
+                        <td>$${alert.price || 'N/A'}</td>
+                        <td>${alert.timestamp}</td>
+                        <td>${JSON.stringify(alert)}</td>
+                    `;
+                    tbody.prepend(row);
+                });
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+            }
+        }
+
+        // Load alerts on page load
+        window.onload = loadAlerts;
+
+        // Refresh alerts every 5 seconds
+        setInterval(loadAlerts, 5000);
+    </script>
+</body>
+</html>

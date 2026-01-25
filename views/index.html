@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Futures Trading</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      text-align: center;
+      max-width: 1200px;
+      width: 100%;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 1rem;
+    }
+    .balance-display {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: #667eea;
+      margin: 1rem 0;
+    }
+    .currency {
+      font-size: 1.2rem;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+    .margin-info {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    .margin-label {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 0.25rem;
+    }
+    .margin-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #28a745;
+    }
+    .margin-warning {
+      color: #dc3545;
+    }
+    .loading {
+      color: #999;
+    }
+    .error {
+      color: #e74c3c;
+    }
+    .futures-form {
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 2px solid #eee;
+    }
+    .form-group {
+      margin-bottom: 1.5rem;
+      text-align: left;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: #333;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+    .required {
+      color: #e74c3c;
+    }
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.3s;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .futures-badge {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+    .submit-btn {
+      width: 100%;
+      padding: 1rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      margin-top: 1rem;
+    }
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+    }
+    .submit-btn:active {
+      transform: translateY(0);
+    }
+    .submit-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .form-note {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+    .webhooks-section {
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 2px solid #eee;
+    }
+    .webhooks-section h2 {
+      text-align: left;
+      color: #333;
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+    .webhooks-table-container {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th {
+      background-color: #f8f9fa;
+      color: #333;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+    }
+    tr:hover {
+      background-color: #f8f9fa;
+    }
+    .webhook-long {
+      background-color: #d4edda !important;
+    }
+    .webhook-short {
+      background-color: #f8d7da !important;
+    }
+    .webhook-loading {
+      text-align: center;
+      padding: 2rem;
+      color: #999;
+    }
+    .webhook-error {
+      text-align: center;
+      padding: 2rem;
+      color: #e74c3c;
+    }
+    .webhook-empty {
+      text-align: center;
+      padding: 2rem;
+      color: #999;
+    }
+    .positions-section {
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 2px solid #eee;
+    }
+    .positions-section h2 {
+      text-align: left;
+      color: #333;
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+    .positions-table-container {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+    .position-long {
+      background-color: #d4edda !important;
+    }
+    .position-short {
+      background-color: #f8d7da !important;
+    }
+    .position-loading {
+      text-align: center;
+      padding: 2rem;
+      color: #999;
+    }
+    .position-error {
+      text-align: center;
+      padding: 2rem;
+      color: #e74c3c;
+    }
+    .position-empty {
+      text-align: center;
+      padding: 2rem;
+      color: #999;
+    }
+    .position-pnl {
+      font-weight: 600;
+    }
+    .position-pnl.positive {
+      color: #28a745;
+    }
+    .position-pnl.negative {
+      color: #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Account Balance</h1>
+    <div id="balance-container">
+      <div class="loading">Loading...</div>
+    </div>
+    
+    <div class="futures-form">
+      <h2>Futures Trading <span class="futures-badge">FUTURES</span></h2>
+      <form id="futures-form">
+        <div class="form-group">
+          <label for="ticker">Ticker <span class="required">*</span></label>
+          <select id="ticker" name="ticker" required>
+            <option value="">Loading tickers...</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="position">Position Type <span class="required">*</span></label>
+          <select id="position" name="position" required>
+            <option value="">Select position...</option>
+            <option value="LONG">LONG</option>
+            <option value="SHORT">SHORT</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="leverage">Leverage <span class="required">*</span></label>
+          <select id="leverage" name="leverage" required>
+            <option value="">Select leverage...</option>
+            <option value="1">1x</option>
+            <option value="2">2x</option>
+            <option value="5">5x</option>
+            <option value="10">10x</option>
+            <option value="20">20x</option>
+            <option value="50">50x</option>
+            <option value="100">100x</option>
+          </select>
+          <div class="form-note">⚠️ Higher leverage increases risk</div>
+        </div>
+        
+        <div class="form-group">
+          <label for="quantity">Position Size <span class="required">*</span></label>
+          <input 
+            type="number" 
+            id="quantity" 
+            name="quantity" 
+            placeholder="0.1" 
+            step="0.000001"
+            min="0.000001"
+            required
+          />
+          <div class="form-note">Quantity in ticker units (e.g., 0.5 ETH)</div>
+        </div>
+        
+        <button type="submit" class="submit-btn" id="submit-btn">
+          Open Futures Position
+        </button>
+      </form>
+    </div>
+    
+    <div class="webhooks-section">
+      <h2>TradingView Alerts</h2>
+      <div class="webhooks-table-container">
+        <table id="alertsTable">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Message</th>
+              <th>Price</th>
+              <th>Timestamp</th>
+              <th>Full Object</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="5" class="webhook-loading">Loading alerts...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="positions-section">
+      <h2>Open Positions</h2>
+      <div class="positions-table-container">
+        <table id="positionsTable">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Size</th>
+              <th>Entry Price</th>
+              <th>Mark Price</th>
+              <th>Unrealized PnL</th>
+              <th>Leverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="7" class="position-loading">Loading positions...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    async function fetchBalance() {
+      try {
+        const response = await fetch('/api/balance');
+        const data = await response.json();
+        
+        const container = document.getElementById('balance-container');
+        let marginHtml = '';
+        if (data.availableMargin !== null && data.availableMargin !== undefined) {
+          const marginValue = parseFloat(data.availableMargin);
+          const marginClass = marginValue > 0 ? 'margin-value' : 'margin-value margin-warning';
+          marginHtml = `
+            <div class="margin-info">
+              <div class="margin-label">Available Margin</div>
+              <div class="${marginClass}">$${data.availableMargin}</div>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div class="balance-display">${data.balance}</div>
+          <div class="currency">${data.currency}</div>
+          ${marginHtml}
+        `;
+      } catch (error) {
+        const container = document.getElementById('balance-container');
+        container.innerHTML = `
+          <div class="error">Error loading balance: ${error.message}</div>
+        `;
+      }
+    }
+    
+    async function fetchTickers() {
+      try {
+        const response = await fetch('/api/futures/tickers');
+        const data = await response.json();
+        
+        const tickerSelect = document.getElementById('ticker');
+        tickerSelect.innerHTML = '<option value="">Select ticker...</option>';
+        
+        if (data.tickers && data.tickers.length > 0) {
+          data.tickers.forEach(ticker => {
+            const option = document.createElement('option');
+            option.value = ticker.symbol; // Use full symbol (e.g., ETH_USDC_PERP)
+            option.textContent = ticker.displayName; // Display as "ETH (ETH_USDC_PERP)"
+            tickerSelect.appendChild(option);
+          });
+        } else {
+          tickerSelect.innerHTML = '<option value="">No tickers available</option>';
+        }
+      } catch (error) {
+        const tickerSelect = document.getElementById('ticker');
+        tickerSelect.innerHTML = '<option value="">Error loading tickers</option>';
+        console.error('Error loading tickers:', error);
+      }
+    }
+    
+    document.getElementById('futures-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submit-btn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Processing...';
+      
+      const formData = {
+        ticker: document.getElementById('ticker').value, // Already full symbol from select
+        position: document.getElementById('position').value,
+        leverage: document.getElementById('leverage').value,
+        quantity: parseFloat(document.getElementById('quantity').value)
+      };
+      
+      try {
+        const response = await fetch('/api/futures/order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          alert(`Futures order submitted successfully!\n\nTicker: ${formData.ticker}\nPosition: ${formData.position}\nQuantity: ${formData.quantity}\nLeverage: ${formData.leverage}x\n\nType: FUTURES`);
+          document.getElementById('futures-form').reset();
+          // Reload balance and tickers after successful order
+          fetchBalance();
+          fetchTickers();
+        } else {
+          alert(`Error: ${data.error || 'Failed to submit order'}`);
+        }
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Open Futures Position';
+      }
+    });
+    
+    async function loadAlerts() {
+      try {
+        const response = await fetch('/webhook');
+        const alerts = await response.json();
+        const tbody = document.querySelector('#alertsTable tbody');
+        tbody.innerHTML = '';
+        
+        if (alerts.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="webhook-empty">No alerts received yet</td></tr>';
+          return;
+        }
+        
+        alerts.forEach(alert => {
+          const colorClass = alert.message && alert.message.includes('LONG') 
+            ? 'webhook-long' 
+            : alert.message && alert.message.includes('SHORT') 
+            ? 'webhook-short' 
+            : '';
+          
+          const row = document.createElement('tr');
+          if (colorClass) {
+            row.className = colorClass;
+          }
+          row.innerHTML = `
+            <td>${alert.symbol || 'N/A'}</td>
+            <td>${alert.message || 'N/A'}</td>
+            <td>$${alert.price || 'N/A'}</td>
+            <td>${alert.timestamp || 'N/A'}</td>
+            <td><code style="font-size: 0.75rem; word-break: break-all;">${JSON.stringify(alert)}</code></td>
+          `;
+          tbody.prepend(row);
+        });
+      } catch (error) {
+        const tbody = document.querySelector('#alertsTable tbody');
+        tbody.innerHTML = `<tr><td colspan="5" class="webhook-error">Error loading alerts: ${error.message}</td></tr>`;
+        console.error('Error loading alerts:', error);
+      }
+    }
+    
+    async function loadPositions() {
+      try {
+        const response = await fetch('/api/futures/positions');
+        const data = await response.json();
+        const positions = data.positions || [];
+        const tbody = document.querySelector('#positionsTable tbody');
+        tbody.innerHTML = '';
+        
+        if (positions.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="position-empty">No open positions</td></tr>';
+          return;
+        }
+        
+        positions.forEach(position => {
+          // Determine side (LONG/SHORT) from position data
+          // Backpack API typically uses 'Bid' for long and 'Ask' for short, or has a side field
+          const side = position.side || (position.unrealizedPnl >= 0 ? 'LONG' : 'SHORT');
+          const isLong = side === 'LONG' || side === 'Bid' || (position.size && parseFloat(position.size) > 0);
+          const colorClass = isLong ? 'position-long' : 'position-short';
+          
+          // Format values
+          const symbol = position.symbol || position.market || 'N/A';
+          const size = position.size || position.quantity || '0';
+          const entryPrice = position.entryPrice || position.avgEntryPrice || 'N/A';
+          const markPrice = position.markPrice || position.currentPrice || 'N/A';
+          const unrealizedPnl = position.unrealizedPnl || position.unrealizedPnl || 0;
+          const leverage = position.leverage || position.leverage || 'N/A';
+          
+          const pnlValue = parseFloat(unrealizedPnl);
+          const pnlClass = pnlValue >= 0 ? 'positive' : 'negative';
+          const pnlSign = pnlValue >= 0 ? '+' : '';
+          
+          const row = document.createElement('tr');
+          row.className = colorClass;
+          row.innerHTML = `
+            <td>${symbol}</td>
+            <td>${isLong ? 'LONG' : 'SHORT'}</td>
+            <td>${size}</td>
+            <td>$${entryPrice}</td>
+            <td>$${markPrice}</td>
+            <td class="position-pnl ${pnlClass}">${pnlSign}$${pnlValue.toFixed(2)}</td>
+            <td>${leverage}x</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        const tbody = document.querySelector('#positionsTable tbody');
+        tbody.innerHTML = `<tr><td colspan="7" class="position-error">Error loading positions: ${error.message}</td></tr>`;
+        console.error('Error loading positions:', error);
+      }
+    }
+    
+    fetchBalance();
+    fetchTickers();
+    loadAlerts();
+    loadPositions();
+    
+    // Refresh alerts every 5 seconds
+    setInterval(loadAlerts, 5000);
+    
+    // Refresh positions every 5 seconds
+    setInterval(loadPositions, 5000);
+  </script>
+</body>
+</html>
