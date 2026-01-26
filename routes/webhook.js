@@ -132,7 +132,7 @@ router.post('/webhook', (req, res) => {
       }
       
       // Calculate quantity: positionValue / price
-      const quantity = POSITION_VALUE / entryPrice;
+      const quantity = POSITION_VALUE;
       const roundedQuantity = roundQuantity(quantity, stepSize);
       
       if (roundedQuantity <= 0) {
