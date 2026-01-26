@@ -310,16 +310,53 @@ router.post('/webhook', (req, res) => {
         console.warn('[Webhook Auto-Trade] Continuing with order placement despite position check error');
       }
       
-      console.log('[Webhook Auto-Trade] Placing main order:', {
+      // Calculate TP and SL prices
+      let tpTriggerPrice, slTriggerPrice, tpLimitPrice, slLimitPrice;
+      if (direction === 'LONG') {
+        // For LONG: TP at +2%, SL at -1%
+        tpTriggerPrice = entryPrice * (1 + TAKE_PROFIT_PERCENT);
+        slTriggerPrice = entryPrice * (1 - STOP_LOSS_PERCENT);
+        // For conditional orders, limit prices should be the same as trigger prices for limit orders
+        tpLimitPrice = tpTriggerPrice;
+        slLimitPrice = slTriggerPrice;
+      } else {
+        // For SHORT: TP at -2% (entryPrice * 0.98), SL at +1% (entryPrice * 1.01)
+        tpTriggerPrice = entryPrice * (1 - TAKE_PROFIT_PERCENT);
+        slTriggerPrice = entryPrice * (1 + STOP_LOSS_PERCENT);
+        // For conditional orders, limit prices should be the same as trigger prices for limit orders
+        tpLimitPrice = tpTriggerPrice;
+        slLimitPrice = slTriggerPrice;
+      }
+      
+      // Prepare conditional orders for TP/SL
+      const conditionalOrders = {
+        takeProfitTriggerPrice: tpTriggerPrice,
+        takeProfitLimitPrice: tpLimitPrice,
+        takeProfitTriggerBy: 'LastPrice', // Can be LastPrice, MarkPrice, or IndexPrice
+        stopLossTriggerPrice: slTriggerPrice,
+        stopLossLimitPrice: slLimitPrice,
+        stopLossTriggerBy: 'LastPrice' // Can be LastPrice, MarkPrice, or IndexPrice
+      };
+      
+      console.log('[Webhook Auto-Trade] Conditional orders (TP/SL) configured:', {
+        takeProfitTriggerPrice: tpTriggerPrice,
+        takeProfitLimitPrice: tpLimitPrice,
+        stopLossTriggerPrice: slTriggerPrice,
+        stopLossLimitPrice: slLimitPrice
+      });
+      
+      console.log('[Webhook Auto-Trade] Placing main order with conditional TP/SL:', {
         symbol: futuresSymbol,
         side,
         direction,
         quantity: roundedQuantity,
         entryPrice,
-        orderType: ORDER_TYPES.MARKET
+        orderType: ORDER_TYPES.MARKET,
+        takeProfitTriggerPrice: tpTriggerPrice,
+        stopLossTriggerPrice: slTriggerPrice
       });
       
-      // Place main market order
+      // Place main market order with conditional TP/SL orders
       let mainOrderResult;
       try {
         mainOrderResult = await placeFuturesOrder(
@@ -327,10 +364,11 @@ router.post('/webhook', (req, res) => {
           side,
           ORDER_TYPES.MARKET,
           roundedQuantity,
-          null // No price for market orders
+          null, // No price for market orders
+          conditionalOrders // Include TP/SL as conditional orders
         );
         
-        console.log('[Webhook Auto-Trade] Main order placed successfully:', mainOrderResult);
+        console.log('[Webhook Auto-Trade] Main order with TP/SL placed successfully:', mainOrderResult);
         
         // Save operation to MongoDB
         try {
@@ -344,138 +382,23 @@ router.post('/webhook', (req, res) => {
             orderType: ORDER_TYPES.MARKET,
             orderId: mainOrderResult.id || mainOrderResult.orderId || mainOrderResult.order_id,
             orderCategory: 'MAIN',
-            takeProfitPrice: null,
-            stopLossPrice: null,
+            takeProfitPrice: tpTriggerPrice,
+            stopLossPrice: slTriggerPrice,
             source: 'WEBHOOK',
             orderResponse: mainOrderResult
           });
           await operation.save();
-          console.log('[Webhook Auto-Trade] Main operation saved to database');
+          console.log('[Webhook Auto-Trade] Main operation with TP/SL saved to database');
         } catch (dbError) {
           console.error('[Webhook Auto-Trade] Failed to save main operation to database:', dbError);
           // Continue even if DB save fails
         }
       } catch (mainOrderError) {
-        console.error('[Webhook Auto-Trade] Failed to place main order:', mainOrderError.message);
+        console.error('[Webhook Auto-Trade] Failed to place main order with TP/SL:', mainOrderError.message);
         if (mainOrderError.response) {
           console.error('[Webhook Auto-Trade] Main order error response:', mainOrderError.response.data);
         }
-        return; // Don't continue with TP/SL if main order failed
-      }
-      
-      // Calculate TP and SL prices
-      let tpPrice, slPrice;
-      if (direction === 'LONG') {
-        // For LONG: TP at +2%, SL at -6%
-        tpPrice = entryPrice * (1 + TAKE_PROFIT_PERCENT);
-        slPrice = entryPrice * (1 - STOP_LOSS_PERCENT);
-      } else {
-        // For SHORT: TP at +2% (entryPrice * 0.98), SL at -6% (entryPrice * 1.06)
-        tpPrice = entryPrice * (1 - TAKE_PROFIT_PERCENT);
-        slPrice = entryPrice * (1 + STOP_LOSS_PERCENT);
-      }
-      
-      // TP and SL use opposite side to close the position
-      const tpSlSide = direction === 'LONG' ? 'Ask' : 'Bid';
-      
-      // Place Take Profit order
-      try {
-        console.log('[Webhook Auto-Trade] Placing Take Profit order:', {
-          symbol: futuresSymbol,
-          side: tpSlSide,
-          price: tpPrice,
-          quantity: roundedQuantity,
-          orderType: ORDER_TYPES.LIMIT
-        });
-        
-        const tpOrderResult = await placeFuturesOrder(
-          futuresSymbol,
-          tpSlSide,
-          ORDER_TYPES.LIMIT,
-          roundedQuantity,
-          tpPrice
-        );
-        
-        console.log('[Webhook Auto-Trade] Take Profit order placed successfully:', tpOrderResult);
-        
-        // Save TP operation to MongoDB
-        try {
-          const tpOperation = new Operation({
-            symbol: futuresSymbol,
-            side: tpSlSide,
-            direction: direction,
-            quantity: roundedQuantity,
-            entryPrice: entryPrice,
-            leverage: leverage,
-            orderType: ORDER_TYPES.LIMIT,
-            orderId: tpOrderResult.id || tpOrderResult.orderId || tpOrderResult.order_id,
-            orderCategory: 'TAKE_PROFIT',
-            takeProfitPrice: tpPrice,
-            stopLossPrice: null,
-            source: 'WEBHOOK',
-            orderResponse: tpOrderResult
-          });
-          await tpOperation.save();
-          console.log('[Webhook Auto-Trade] TP operation saved to database');
-        } catch (dbError) {
-          console.error('[Webhook Auto-Trade] Failed to save TP operation to database:', dbError);
-        }
-      } catch (tpError) {
-        console.error('[Webhook Auto-Trade] Failed to place Take Profit order:', tpError.message);
-        if (tpError.response) {
-          console.error('[Webhook Auto-Trade] TP order error response:', tpError.response.data);
-        }
-        // Continue even if TP fails
-      }
-      
-      // Place Stop Loss order
-      try {
-        console.log('[Webhook Auto-Trade] Placing Stop Loss order:', {
-          symbol: futuresSymbol,
-          side: tpSlSide,
-          price: slPrice,
-          quantity: roundedQuantity,
-          orderType: ORDER_TYPES.LIMIT
-        });
-        
-        const slOrderResult = await placeFuturesOrder(
-          futuresSymbol,
-          tpSlSide,
-          ORDER_TYPES.LIMIT,
-          roundedQuantity,
-          slPrice
-        );
-        
-        console.log('[Webhook Auto-Trade] Stop Loss order placed successfully:', slOrderResult);
-        
-        // Save SL operation to MongoDB
-        try {
-          const slOperation = new Operation({
-            symbol: futuresSymbol,
-            side: tpSlSide,
-            direction: direction,
-            quantity: roundedQuantity,
-            entryPrice: entryPrice,
-            leverage: leverage,
-            orderType: ORDER_TYPES.LIMIT,
-            orderId: slOrderResult.id || slOrderResult.orderId || slOrderResult.order_id,
-            orderCategory: 'STOP_LOSS',
-            takeProfitPrice: null,
-            stopLossPrice: slPrice,
-            source: 'WEBHOOK',
-            orderResponse: slOrderResult
-          });
-          await slOperation.save();
-          console.log('[Webhook Auto-Trade] SL operation saved to database');
-        } catch (dbError) {
-          console.error('[Webhook Auto-Trade] Failed to save SL operation to database:', dbError);
-        }
-      } catch (slError) {
-        console.error('[Webhook Auto-Trade] Failed to place Stop Loss order:', slError.message);
-        if (slError.response) {
-          console.error('[Webhook Auto-Trade] SL order error response:', slError.response.data);
-        }
-        // Continue even if SL fails
+        return; // Don't continue if main order failed
       }
       
       console.log('[Webhook Auto-Trade] Auto-trading completed successfully');

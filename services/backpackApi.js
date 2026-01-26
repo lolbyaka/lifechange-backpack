@@ -282,9 +282,16 @@ async function cancelAllOrdersForSymbol(symbol) {
  * @param {string} orderType - Order type (Market or Limit)
  * @param {number|string} quantity - Order quantity
  * @param {number|string|null} price - Order price (required for Limit orders)
+ * @param {object|null} conditionalOrders - Optional conditional orders (TP/SL)
+ * @param {string|null} conditionalOrders.takeProfitTriggerPrice - TP trigger price
+ * @param {string|null} conditionalOrders.takeProfitLimitPrice - TP limit price (optional, if not set will be market)
+ * @param {string|null} conditionalOrders.takeProfitTriggerBy - TP trigger by (LastPrice, MarkPrice, IndexPrice)
+ * @param {string|null} conditionalOrders.stopLossTriggerPrice - SL trigger price
+ * @param {string|null} conditionalOrders.stopLossLimitPrice - SL limit price (optional, if not set will be market)
+ * @param {string|null} conditionalOrders.stopLossTriggerBy - SL trigger by (LastPrice, MarkPrice, IndexPrice)
  * @returns {Promise<object>} - Order response
  */
-async function placeFuturesOrder(symbol, side, orderType, quantity, price = null) {
+async function placeFuturesOrder(symbol, side, orderType, quantity, price = null, conditionalOrders = null) {
   try {
     // Validate side - API expects "Bid" or "Ask" (not "Buy" or "Sell")
     if (!side || typeof side !== 'string') {
@@ -310,6 +317,28 @@ async function placeFuturesOrder(symbol, side, orderType, quantity, price = null
     // Add price for limit orders
     if (normalizedOrderType === 'Limit' && price) {
       orderParams.price = price.toString();
+    }
+
+    // Add conditional orders (TP/SL) if provided
+    if (conditionalOrders) {
+      if (conditionalOrders.takeProfitTriggerPrice) {
+        orderParams.takeProfitTriggerPrice = conditionalOrders.takeProfitTriggerPrice.toString();
+        if (conditionalOrders.takeProfitLimitPrice) {
+          orderParams.takeProfitLimitPrice = conditionalOrders.takeProfitLimitPrice.toString();
+        }
+        if (conditionalOrders.takeProfitTriggerBy) {
+          orderParams.takeProfitTriggerBy = conditionalOrders.takeProfitTriggerBy;
+        }
+      }
+      if (conditionalOrders.stopLossTriggerPrice) {
+        orderParams.stopLossTriggerPrice = conditionalOrders.stopLossTriggerPrice.toString();
+        if (conditionalOrders.stopLossLimitPrice) {
+          orderParams.stopLossLimitPrice = conditionalOrders.stopLossLimitPrice.toString();
+        }
+        if (conditionalOrders.stopLossTriggerBy) {
+          orderParams.stopLossTriggerBy = conditionalOrders.stopLossTriggerBy;
+        }
+      }
     }
     
     console.log('Order params before signing:', JSON.stringify(orderParams, null, 2));
