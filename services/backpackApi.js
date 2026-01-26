@@ -156,6 +156,126 @@ async function fetchOpenPositions() {
 }
 
 /**
+ * Fetch open orders from Backpack Exchange
+ * @param {string} symbol - Futures symbol (optional, if not provided fetches all orders)
+ * @returns {Promise<Array>} - Array of open order objects
+ */
+async function fetchOpenOrders(symbol = null) {
+  try {
+    const params = {};
+    if (symbol) {
+      params.symbol = symbol;
+    }
+    
+    const { signature, timestamp, window, apiKey } = await signRequest(API_INSTRUCTIONS.ORDER_QUERY, params);
+    
+    const response = await axios.get(`${BACKPACK_API_URL}/api/v1/orders`, {
+      params,
+      headers: {
+        'X-API-KEY': apiKey,
+        'X-SIGNATURE': signature,
+        'X-TIMESTAMP': timestamp.toString(),
+        'X-WINDOW': window.toString()
+      }
+    });
+    
+    // API returns an array of orders
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching open orders from Backpack Exchange:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Cancel a specific order on Backpack Exchange
+ * @param {string} orderId - Order ID to cancel
+ * @param {string} symbol - Futures symbol
+ * @returns {Promise<object>} - Cancellation response
+ */
+async function cancelOrder(orderId, symbol) {
+  try {
+    if (!orderId || !symbol) {
+      throw new Error('orderId and symbol are required to cancel an order');
+    }
+    
+    const cancelParams = {
+      orderId: orderId.toString(),
+      symbol: symbol
+    };
+    
+    const { signature, timestamp, window, apiKey } = await signRequest(API_INSTRUCTIONS.ORDER_CANCEL, cancelParams);
+    
+    const response = await axios.delete(`${BACKPACK_API_URL}/api/v1/order`, {
+      params: cancelParams,
+      headers: {
+        'X-API-KEY': apiKey,
+        'X-SIGNATURE': signature,
+        'X-TIMESTAMP': timestamp.toString(),
+        'X-WINDOW': window.toString()
+      }
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error(`Error cancelling order ${orderId} for ${symbol}:`, error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Cancel all open orders for a specific symbol
+ * @param {string} symbol - Futures symbol
+ * @returns {Promise<Array>} - Array of cancellation results
+ */
+async function cancelAllOrdersForSymbol(symbol) {
+  try {
+    // Fetch all open orders for the symbol
+    const openOrders = await fetchOpenOrders(symbol);
+    
+    if (!openOrders || openOrders.length === 0) {
+      console.log(`[Cancel Orders] No open orders found for ${symbol}`);
+      return [];
+    }
+    
+    console.log(`[Cancel Orders] Found ${openOrders.length} open order(s) for ${symbol}`);
+    
+    // Cancel each order
+    const cancelResults = [];
+    for (const order of openOrders) {
+      const orderId = order.id || order.orderId || order.order_id;
+      if (!orderId) {
+        console.warn(`[Cancel Orders] Order missing ID, skipping:`, order);
+        continue;
+      }
+      
+      try {
+        const result = await cancelOrder(orderId, symbol);
+        cancelResults.push({ orderId, success: true, result });
+        console.log(`[Cancel Orders] Successfully cancelled order ${orderId} for ${symbol}`);
+      } catch (error) {
+        cancelResults.push({ orderId, success: false, error: error.message });
+        console.error(`[Cancel Orders] Failed to cancel order ${orderId}:`, error.message);
+        // Continue cancelling other orders even if one fails
+      }
+    }
+    
+    return cancelResults;
+  } catch (error) {
+    console.error(`Error cancelling all orders for ${symbol}:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Place a futures order on Backpack Exchange
  * @param {string} symbol - Futures symbol
  * @param {string} side - Order side (Bid or Ask)
@@ -238,5 +358,8 @@ module.exports = {
   getFuturesMarkets,
   getMarketInfo,
   placeFuturesOrder,
-  fetchOpenPositions
+  fetchOpenPositions,
+  fetchOpenOrders,
+  cancelOrder,
+  cancelAllOrdersForSymbol
 };

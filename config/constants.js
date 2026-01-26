@@ -31,7 +31,9 @@ const API_INSTRUCTIONS = {
   BALANCE_QUERY: 'balanceQuery',
   COLLATERAL_QUERY: 'collateralQuery',
   ORDER_EXECUTE: 'orderExecute',
-  POSITIONS_QUERY: 'positionQuery'
+  POSITIONS_QUERY: 'positionQuery',
+  ORDER_QUERY: 'orderQuery',
+  ORDER_CANCEL: 'orderCancel'
 };
 
 // Side mappings

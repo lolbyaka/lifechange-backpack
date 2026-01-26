@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { addAlert, getAlerts } = require('../services/webhookStorage');
-const { getFuturesTicker, getMarketInfo, placeFuturesOrder } = require('../services/backpackApi');
+const { getFuturesTicker, getMarketInfo, placeFuturesOrder, fetchOpenPositions, fetchOpenOrders, cancelAllOrdersForSymbol } = require('../services/backpackApi');
 const { normalizeSide, roundQuantity } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
@@ -10,7 +10,7 @@ const Operation = require('../models/Operation');
 const POSITION_VALUE = 0.0034; // USD
 const LEVERAGE = 20;
 const TAKE_PROFIT_PERCENT = 0.02; // 2%
-const STOP_LOSS_PERCENT = 0.06; // 6%
+const STOP_LOSS_PERCENT = 0.01; // 6%
 
 /**
  * Determine trading direction from message
@@ -30,6 +30,52 @@ function determineDirection(message) {
   }
   
   return null;
+}
+
+/**
+ * Find existing position for a symbol
+ * @param {Array} positions - Array of position objects
+ * @param {string} symbol - Symbol to find
+ * @returns {object|null} - Existing position or null
+ */
+function findExistingPosition(positions, symbol) {
+  return positions.find(p => {
+    const posSymbol = p.symbol || p.market;
+    const netQuantity = parseFloat(p.netQuantity || p.netExposureQuantity || 0);
+    return posSymbol === symbol && Math.abs(netQuantity) > 0;
+  });
+}
+
+/**
+ * Get position side (LONG or SHORT) from position object
+ * @param {object} position - Position object
+ * @returns {string} - 'LONG' or 'SHORT'
+ */
+function getPositionSide(position) {
+  const netQuantity = parseFloat(position.netQuantity || position.netExposureQuantity || 0);
+  return netQuantity > 0 ? 'LONG' : 'SHORT';
+}
+
+/**
+ * Check if existing position is opposite to new direction
+ * @param {object} existingPosition - Existing position object
+ * @param {string} newDirection - New direction ('LONG' or 'SHORT')
+ * @returns {boolean} - True if opposite
+ */
+function isOppositePosition(existingPosition, newDirection) {
+  const existingSide = getPositionSide(existingPosition);
+  return existingSide !== newDirection;
+}
+
+/**
+ * Check if existing position is same direction as new direction
+ * @param {object} existingPosition - Existing position object
+ * @param {string} newDirection - New direction ('LONG' or 'SHORT')
+ * @returns {boolean} - True if same direction
+ */
+function isSameDirectionPosition(existingPosition, newDirection) {
+  const existingSide = getPositionSide(existingPosition);
+  return existingSide === newDirection;
 }
 
 /**
@@ -157,6 +203,112 @@ router.post('/webhook', (req, res) => {
       
       // Determine side: LONG = Bid (buy), SHORT = Ask (sell)
       const side = normalizeSide(direction);
+      
+      // Check for existing positions before placing order
+      let existingPosition = null;
+      try {
+        const positions = await fetchOpenPositions();
+        existingPosition = findExistingPosition(positions, futuresSymbol);
+        
+        if (existingPosition) {
+          const existingSide = getPositionSide(existingPosition);
+          console.log('[Webhook Auto-Trade] Found existing position:', {
+            symbol: futuresSymbol,
+            existingSide,
+            newDirection: direction,
+            positionSize: Math.abs(parseFloat(existingPosition.netQuantity || existingPosition.netExposureQuantity || 0))
+          });
+          
+          // Check if same direction
+          if (isSameDirectionPosition(existingPosition, direction)) {
+            console.log('[Webhook Auto-Trade] Position already exists in same direction. Skipping signal.');
+            return; // Do nothing, skip the signal
+          }
+          
+          // Check if opposite direction
+          if (isOppositePosition(existingPosition, direction)) {
+            console.log('[Webhook Auto-Trade] Opposite position detected. Closing existing position first...');
+            
+            // Step 1: Cancel all TP/SL orders for the symbol
+            try {
+              console.log('[Webhook Auto-Trade] Cancelling existing TP/SL orders...');
+              await cancelAllOrdersForSymbol(futuresSymbol);
+              console.log('[Webhook Auto-Trade] Successfully cancelled TP/SL orders');
+            } catch (cancelError) {
+              console.error('[Webhook Auto-Trade] Failed to cancel TP/SL orders:', cancelError.message);
+              // Continue anyway - old TP/SL won't conflict if position is closed
+            }
+            
+            // Step 2: Close existing position
+            try {
+              const existingSize = Math.abs(parseFloat(existingPosition.netQuantity || existingPosition.netExposureQuantity || 0));
+              const closeSide = existingSide === 'LONG' ? 'Ask' : 'Bid'; // Opposite side to close
+              
+              console.log('[Webhook Auto-Trade] Closing existing position:', {
+                symbol: futuresSymbol,
+                side: closeSide,
+                size: existingSize,
+                existingDirection: existingSide
+              });
+              
+              // Get stepSize for closing order quantity precision
+              let closeStepSize = stepSize;
+              if (!closeStepSize) {
+                try {
+                  const marketInfo = await getMarketInfo(futuresSymbol);
+                  closeStepSize = marketInfo?.filters?.quantity?.stepSize || null;
+                } catch (e) {
+                  // Use existing stepSize or default
+                }
+              }
+              
+              const roundedCloseQuantity = roundQuantity(existingSize, closeStepSize);
+              
+              const closeOrderResult = await placeFuturesOrder(
+                futuresSymbol,
+                closeSide,
+                ORDER_TYPES.MARKET,
+                roundedCloseQuantity,
+                null
+              );
+              
+              console.log('[Webhook Auto-Trade] Position closed successfully:', closeOrderResult);
+              
+              // Brief wait to ensure position is closed (optional but recommended)
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Verify position is closed (optional)
+              try {
+                const updatedPositions = await fetchOpenPositions();
+                const stillOpen = findExistingPosition(updatedPositions, futuresSymbol);
+                if (stillOpen) {
+                  const stillOpenSize = Math.abs(parseFloat(stillOpen.netQuantity || stillOpen.netExposureQuantity || 0));
+                  if (stillOpenSize > 0.000001) { // Small threshold for floating point
+                    console.warn('[Webhook Auto-Trade] Position may not be fully closed. Remaining size:', stillOpenSize);
+                  }
+                }
+              } catch (verifyError) {
+                console.warn('[Webhook Auto-Trade] Could not verify position closure:', verifyError.message);
+                // Continue anyway
+              }
+              
+            } catch (closeError) {
+              console.error('[Webhook Auto-Trade] Failed to close existing position:', closeError.message);
+              if (closeError.response) {
+                console.error('[Webhook Auto-Trade] Close position error response:', closeError.response.data);
+              }
+              // Abort - don't create conflicting positions
+              return;
+            }
+          }
+        } else {
+          console.log('[Webhook Auto-Trade] No existing position found. Proceeding with new position.');
+        }
+      } catch (positionCheckError) {
+        console.error('[Webhook Auto-Trade] Error checking existing positions:', positionCheckError.message);
+        // Fail-safe: continue with normal flow if position check fails
+        console.warn('[Webhook Auto-Trade] Continuing with order placement despite position check error');
+      }
       
       console.log('[Webhook Auto-Trade] Placing main order:', {
         symbol: futuresSymbol,
