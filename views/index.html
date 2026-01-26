@@ -505,9 +505,9 @@
         
         positions.forEach(position => {
           // Determine side (LONG/SHORT) from position data
-          // Backpack API typically uses 'Bid' for long and 'Ask' for short, or has a side field
+          // Backend provides 'side' field as 'LONG' or 'SHORT'
           const side = position.side || (position.unrealizedPnl >= 0 ? 'LONG' : 'SHORT');
-          const isLong = side === 'LONG' || side === 'Bid' || (position.size && parseFloat(position.size) > 0);
+          const isLong = side === 'LONG' || side === 'Bid';
           const colorClass = isLong ? 'position-long' : 'position-short';
           
           // Format values

@@ -4,6 +4,7 @@ const { addAlert, getAlerts } = require('../services/webhookStorage');
 const { getFuturesTicker, getMarketInfo, placeFuturesOrder } = require('../services/backpackApi');
 const { normalizeSide, roundQuantity } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
+const Operation = require('../models/Operation');
 
 // Constants for auto-trading
 const POSITION_VALUE = 0.0034; // USD
@@ -35,8 +36,14 @@ function determineDirection(message) {
  * GET /webhook
  * Retrieve all stored alerts
  */
-router.get('/webhook', (req, res) => {
-  res.json(getAlerts());
+router.get('/webhook', async (req, res) => {
+  try {
+    const alerts = await getAlerts();
+    res.json(alerts);
+  } catch (error) {
+    console.error('Error fetching webhooks:', error);
+    res.status(500).json({ error: 'Failed to fetch webhooks' });
+  }
 });
 
 /**
@@ -74,9 +81,17 @@ router.post('/webhook', (req, res) => {
   const symbol = alertData.symbol || alertData.ticker || alertData.tickerSymbol;
   const message = alertData.message || alertData.text || alertData.alertMessage || '';
   const price = alertData.price ? parseFloat(alertData.price) : null;
+  const positionSize = alertData.positionSize ? parseFloat(alertData.positionSize) : null;
+  const leverage = alertData.leverageSize ? parseInt(alertData.leverageSize) : LEVERAGE;
   
-  // Add alert with timestamp
-  addAlert(alertData);
+  if(!positionSize) {
+    console.error('[Webhook Auto-Trade] Missing position size in webhook data');
+    return;
+  }
+  // Add alert with timestamp (async, don't wait)
+  addAlert(alertData).catch(err => {
+    console.error('Error saving webhook to database:', err);
+  });
   
   // Auto-trade logic (runs asynchronously, doesn't block webhook response)
   (async () => {
@@ -132,7 +147,7 @@ router.post('/webhook', (req, res) => {
       }
       
       // Calculate quantity: positionValue / price
-      const quantity = POSITION_VALUE;
+      const quantity = positionSize || POSITION_VALUE;
       const roundedQuantity = roundQuantity(quantity, stepSize);
       
       if (roundedQuantity <= 0) {
@@ -164,6 +179,30 @@ router.post('/webhook', (req, res) => {
         );
         
         console.log('[Webhook Auto-Trade] Main order placed successfully:', mainOrderResult);
+        
+        // Save operation to MongoDB
+        try {
+          const operation = new Operation({
+            symbol: futuresSymbol,
+            side: side,
+            direction: direction,
+            quantity: roundedQuantity,
+            entryPrice: entryPrice,
+            leverage: leverage,
+            orderType: ORDER_TYPES.MARKET,
+            orderId: mainOrderResult.id || mainOrderResult.orderId || mainOrderResult.order_id,
+            orderCategory: 'MAIN',
+            takeProfitPrice: null,
+            stopLossPrice: null,
+            source: 'WEBHOOK',
+            orderResponse: mainOrderResult
+          });
+          await operation.save();
+          console.log('[Webhook Auto-Trade] Main operation saved to database');
+        } catch (dbError) {
+          console.error('[Webhook Auto-Trade] Failed to save main operation to database:', dbError);
+          // Continue even if DB save fails
+        }
       } catch (mainOrderError) {
         console.error('[Webhook Auto-Trade] Failed to place main order:', mainOrderError.message);
         if (mainOrderError.response) {
@@ -206,6 +245,29 @@ router.post('/webhook', (req, res) => {
         );
         
         console.log('[Webhook Auto-Trade] Take Profit order placed successfully:', tpOrderResult);
+        
+        // Save TP operation to MongoDB
+        try {
+          const tpOperation = new Operation({
+            symbol: futuresSymbol,
+            side: tpSlSide,
+            direction: direction,
+            quantity: roundedQuantity,
+            entryPrice: entryPrice,
+            leverage: leverage,
+            orderType: ORDER_TYPES.LIMIT,
+            orderId: tpOrderResult.id || tpOrderResult.orderId || tpOrderResult.order_id,
+            orderCategory: 'TAKE_PROFIT',
+            takeProfitPrice: tpPrice,
+            stopLossPrice: null,
+            source: 'WEBHOOK',
+            orderResponse: tpOrderResult
+          });
+          await tpOperation.save();
+          console.log('[Webhook Auto-Trade] TP operation saved to database');
+        } catch (dbError) {
+          console.error('[Webhook Auto-Trade] Failed to save TP operation to database:', dbError);
+        }
       } catch (tpError) {
         console.error('[Webhook Auto-Trade] Failed to place Take Profit order:', tpError.message);
         if (tpError.response) {
@@ -233,6 +295,29 @@ router.post('/webhook', (req, res) => {
         );
         
         console.log('[Webhook Auto-Trade] Stop Loss order placed successfully:', slOrderResult);
+        
+        // Save SL operation to MongoDB
+        try {
+          const slOperation = new Operation({
+            symbol: futuresSymbol,
+            side: tpSlSide,
+            direction: direction,
+            quantity: roundedQuantity,
+            entryPrice: entryPrice,
+            leverage: leverage,
+            orderType: ORDER_TYPES.LIMIT,
+            orderId: slOrderResult.id || slOrderResult.orderId || slOrderResult.order_id,
+            orderCategory: 'STOP_LOSS',
+            takeProfitPrice: null,
+            stopLossPrice: slPrice,
+            source: 'WEBHOOK',
+            orderResponse: slOrderResult
+          });
+          await slOperation.save();
+          console.log('[Webhook Auto-Trade] SL operation saved to database');
+        } catch (dbError) {
+          console.error('[Webhook Auto-Trade] Failed to save SL operation to database:', dbError);
+        }
       } catch (slError) {
         console.error('[Webhook Auto-Trade] Failed to place Stop Loss order:', slError.message);
         if (slError.response) {

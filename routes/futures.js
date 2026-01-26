@@ -3,6 +3,7 @@ const router = express.Router();
 const { getFuturesMarkets, getFuturesTicker, getMarketInfo, placeFuturesOrder, fetchOpenPositions } = require('../services/backpackApi');
 const { validateFuturesOrder, normalizeSide, roundQuantity } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
+const Operation = require('../models/Operation');
 
 /**
  * GET /api/futures/tickers
@@ -124,6 +125,30 @@ router.post('/api/futures/order', async (req, res) => {
       );
       
       console.log('Order placed successfully:', orderResult);
+      
+      // Save operation to MongoDB
+      try {
+        const operation = new Operation({
+          symbol: futuresSymbol,
+          side: side,
+          direction: position, // LONG or SHORT
+          quantity: quantity,
+          entryPrice: currentPrice,
+          leverage: parseInt(leverage),
+          orderType: ORDER_TYPES.MARKET,
+          orderId: orderResult.id || orderResult.orderId || orderResult.order_id || orderResult.clientId || orderResult.client_id,
+          orderCategory: 'MAIN',
+          takeProfitPrice: null,
+          stopLossPrice: null,
+          source: 'MANUAL',
+          orderResponse: orderResult
+        });
+        await operation.save();
+        console.log('Operation saved to database');
+      } catch (dbError) {
+        console.error('Failed to save operation to database:', dbError);
+        // Continue even if DB save fails
+      }
     } catch (orderError) {
       console.error('Failed to place order:', orderError);
       throw orderError;
