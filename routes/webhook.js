@@ -7,10 +7,10 @@ const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
 
 // Constants for auto-trading
-const POSITION_VALUE = 0.0034; // USD
+const POSITION_VALUE = 0.008; // token qty
 const LEVERAGE = 20;
-const TAKE_PROFIT_PERCENT = 0.02; // 2%
-const STOP_LOSS_PERCENT = 0.01; // 6%
+const TAKE_PROFIT_PERCENT = 0.0014;
+const STOP_LOSS_PERCENT = 0.01;
 
 /**
  * Determine trading direction from message

@@ -309,7 +309,7 @@
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${alert.timestamp || 'N/A'}</td>
             <td class="px-6 py-4 text-xs text-gray-600 break-all"><code class="bg-gray-100 px-2 py-1 rounded">${JSON.stringify(alert)}</code></td>
           `;
-          tbody.prepend(row);
+          tbody.appendChild(row);
         });
       } catch (error) {
         const tbody = document.querySelector('#alertsTable tbody');
