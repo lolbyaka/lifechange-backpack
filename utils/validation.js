@@ -61,6 +61,29 @@ function roundQuantity(quantity, stepSize) {
 }
 
 /**
+ * Round price to appropriate precision based on tickSize
+ * @param {number} price - Price to round
+ * @param {string|null} tickSize - Tick size from market info (e.g., "0.01")
+ * @returns {number} - Rounded price
+ */
+function roundPrice(price, tickSize) {
+  if (!tickSize || tickSize === '0' || tickSize === '0.0') {
+    return Math.floor(price * 1000000) / 1000000;
+  }
+  const tickSizeNum = parseFloat(tickSize);
+  if (isNaN(tickSizeNum) || tickSizeNum <= 0) {
+    return Math.floor(price * 1000000) / 1000000;
+  }
+  const tickSizeStr = tickSize.toString();
+  if (tickSizeStr.includes('.')) {
+    const decimals = tickSizeStr.split('.')[1].length;
+    const multiplier = Math.pow(10, decimals);
+    return Math.floor(price * multiplier) / multiplier;
+  }
+  return Math.floor(price);
+}
+
+/**
  * Validate futures order parameters
  * @param {object} params - Order parameters
  * @param {string} params.ticker - Ticker symbol
@@ -105,5 +128,6 @@ module.exports = {
   normalizeSide,
   normalizeOrderType,
   roundQuantity,
+  roundPrice,
   validateFuturesOrder
 };

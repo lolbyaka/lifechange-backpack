@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { addAlert, getAlerts } = require('../services/webhookStorage');
-const { getFuturesTicker, getMarketInfo, placeFuturesOrder, fetchOpenPositions, fetchOpenOrders, cancelAllOrdersForSymbol } = require('../services/backpackApi');
-const { normalizeSide, roundQuantity } = require('../utils/validation');
+const { getFuturesTicker, getMarketInfo, placeFuturesOrder, placeFuturesTriggerOrder, fetchOpenPositions, fetchOpenOrders, cancelAllOrdersForSymbol } = require('../services/backpackApi');
+const { normalizeSide, roundQuantity, roundPrice } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
 
@@ -166,12 +166,14 @@ router.post('/webhook', (req, res) => {
       }
       
       
-      // Get market info for stepSize precision
+      // Get market info for stepSize and tickSize precision
       let stepSize = null;
+      let tickSize = null;
       try {
         const marketInfo = await getMarketInfo(futuresSymbol);
         stepSize = marketInfo?.filters?.quantity?.stepSize || null;
-        console.log('[Webhook Auto-Trade] Market stepSize:', stepSize);
+        tickSize = marketInfo?.filters?.price?.tickSize || null;
+        console.log('[Webhook Auto-Trade] Market stepSize:', stepSize, 'tickSize:', tickSize);
       } catch (marketError) {
         console.warn('[Webhook Auto-Trade] Could not fetch market info, using default precision:', marketError.message);
       }
@@ -285,27 +287,13 @@ router.post('/webhook', (req, res) => {
         console.error('[Webhook Auto-Trade] Error checking existing positions:', positionCheckError.message);
       }
       
-      // Compute TP/SL from current price before placing — attach to opening order so we don't place a second "sell" (which would execute immediately and close the position).
-      // LONG: TP = Entry × (1 + TP_ROI/(100×Leverage)), SL = Entry × (1 − SL_ROI/(100×Leverage))
-      // SHORT: TP = Entry × (1 − TP_ROI/(100×Leverage)), SL = Entry × (1 + SL_ROI/(100×Leverage))
-      let tpTriggerPrice, slTriggerPrice;
-      if (direction === 'LONG') {
-        tpTriggerPrice = entryPrice * (1 + TP_ROI_PERCENT / (100 * leverage));
-        slTriggerPrice = entryPrice * (1 - SL_ROI_PERCENT / (100 * leverage));
-      } else {
-        tpTriggerPrice = entryPrice * (1 - TP_ROI_PERCENT / (100 * leverage));
-        slTriggerPrice = entryPrice * (1 + SL_ROI_PERCENT / (100 * leverage));
-      }
-
-      console.log('[Webhook Auto-Trade] Placing main market order with TP/SL attached:', {
+      // Step 1: Open position only (no TP/SL in same request)
+      console.log('[Webhook Auto-Trade] Placing market order to open position (no TP/SL):', {
         symbol: futuresSymbol,
         quantity: roundedQuantity,
-        entryPrice,
-        tpTriggerPrice,
-        slTriggerPrice
+        side
       });
 
-      // Single order: open position + TP/SL attached. No second order (a second "sell" would execute immediately and close the long).
       let mainOrderResult;
       try {
         mainOrderResult = await placeFuturesOrder(
@@ -313,21 +301,95 @@ router.post('/webhook', (req, res) => {
           side,
           ORDER_TYPES.MARKET,
           roundedQuantity,
-          null,
-          {
-            takeProfitTriggerPrice: tpTriggerPrice,
-            takeProfitTriggerBy: 'MarkPrice',
-            stopLossTriggerPrice: slTriggerPrice,
-            stopLossTriggerBy: 'MarkPrice'
-          }
+          null
         );
-        console.log('[Webhook Auto-Trade] Main order with TP/SL placed successfully:', mainOrderResult);
+        console.log('[Webhook Auto-Trade] Position opened successfully:', mainOrderResult);
       } catch (mainOrderError) {
         console.error('[Webhook Auto-Trade] Failed to place main order:', mainOrderError.message);
         if (mainOrderError.response) {
           console.error('[Webhook Auto-Trade] Main order error response:', mainOrderError.response.data);
         }
         return;
+      }
+
+      // Step 2: Wait for position to be reflected, then get REAL entry price from position
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      let openedPosition;
+      try {
+        const positions = await fetchOpenPositions();
+        openedPosition = findExistingPosition(positions, futuresSymbol);
+        if (!openedPosition) {
+          console.error('[Webhook Auto-Trade] Could not find opened position for', futuresSymbol);
+          return;
+        }
+      } catch (posError) {
+        console.error('[Webhook Auto-Trade] Failed to fetch position details:', posError.message);
+        return;
+      }
+
+      const realEntryPrice = parseFloat(openedPosition.entryPrice || openedPosition.entry_price);
+      const openedPositionSize = Math.abs(parseFloat(openedPosition.netQuantity || openedPosition.netExposureQuantity || 0));
+      if (!realEntryPrice || isNaN(realEntryPrice) || realEntryPrice <= 0 || !openedPositionSize || openedPositionSize <= 0) {
+        console.error('[Webhook Auto-Trade] Invalid position data:', { realEntryPrice, openedPositionSize, openedPosition });
+        return;
+      }
+
+      console.log('[Webhook Auto-Trade] Position details:', { realEntryPrice, openedPositionSize, direction });
+
+      // Step 3: Calculate TP/SL from REAL entry price and place conditional (market) orders
+      // LONG: TP = Entry × (1 + TP_ROI/(100×Leverage)), SL = Entry × (1 − SL_ROI/(100×Leverage))
+      // SHORT: TP = Entry × (1 − TP_ROI/(100×Leverage)), SL = Entry × (1 + SL_ROI/(100×Leverage))
+      let tpTriggerPrice, slTriggerPrice;
+      if (direction === 'LONG') {
+        tpTriggerPrice = realEntryPrice * (1 + TP_ROI_PERCENT / (100 * leverage));
+        slTriggerPrice = realEntryPrice * (1 - SL_ROI_PERCENT / (100 * leverage));
+      } else {
+        tpTriggerPrice = realEntryPrice * (1 - TP_ROI_PERCENT / (100 * leverage));
+        slTriggerPrice = realEntryPrice * (1 + SL_ROI_PERCENT / (100 * leverage));
+      }
+      tpTriggerPrice = roundPrice(tpTriggerPrice, tickSize);
+      slTriggerPrice = roundPrice(slTriggerPrice, tickSize);
+
+      const closeSide = direction === 'LONG' ? 'Ask' : 'Bid';
+      const roundedPositionSize = roundQuantity(openedPositionSize, stepSize);
+
+      console.log('[Webhook Auto-Trade] Placing conditional TP/SL orders (market type) from real entry:', {
+        symbol: futuresSymbol,
+        realEntryPrice,
+        tpTriggerPrice,
+        slTriggerPrice,
+        quantity: roundedPositionSize
+      });
+
+      try {
+        await placeFuturesTriggerOrder(
+          futuresSymbol,
+          closeSide,
+          roundedPositionSize,
+          tpTriggerPrice,
+          'MarkPrice',
+          true
+        );
+        console.log('[Webhook Auto-Trade] Take-profit conditional order placed');
+      } catch (tpError) {
+        console.error('[Webhook Auto-Trade] Failed to place TP order:', tpError.message);
+        if (tpError.response) console.error('[Webhook Auto-Trade] TP error response:', tpError.response.data);
+      }
+
+      try {
+        await placeFuturesTriggerOrder(
+          futuresSymbol,
+          closeSide,
+          roundedPositionSize,
+          slTriggerPrice,
+          'MarkPrice',
+          true
+        );
+        console.log('[Webhook Auto-Trade] Stop-loss conditional order placed');
+      } catch (slError) {
+        console.error('[Webhook Auto-Trade] Failed to place SL order:', slError.message);
+        if (slError.response) console.error('[Webhook Auto-Trade] SL error response:', slError.response.data);
       }
     } catch (error) {
       console.error('[Webhook Auto-Trade] Unexpected error in auto-trading logic:', error.message);

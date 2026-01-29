@@ -386,6 +386,59 @@ async function placeFuturesOrder(symbol, side, orderType, quantity, price = null
   }
 }
 
+/**
+ * Place a conditional (trigger) futures order - executes as Market when trigger price is hit.
+ * Used for TP/SL on an existing position (reduce-only).
+ * @param {string} symbol - Futures symbol
+ * @param {string} side - Order side (Bid or Ask) - use opposite of position to close (Ask for LONG, Bid for SHORT)
+ * @param {number|string} quantity - Order quantity (position size to close)
+ * @param {number|string} triggerPrice - Price at which the order triggers
+ * @param {string} triggerBy - Reference price: LastPrice, MarkPrice, or IndexPrice
+ * @param {boolean} reduceOnly - If true, order can only reduce position (default true for TP/SL)
+ * @returns {Promise<object>} - Order response
+ */
+async function placeFuturesTriggerOrder(symbol, side, quantity, triggerPrice, triggerBy = 'MarkPrice', reduceOnly = true) {
+  try {
+    const normalizedSide = side.charAt(0).toUpperCase() + side.slice(1).toLowerCase();
+    if (normalizedSide !== 'Bid' && normalizedSide !== 'Ask') {
+      throw new Error(`side must be "Bid" or "Ask". Received: ${side}`);
+    }
+
+    const orderParams = {
+      symbol,
+      side: normalizedSide,
+      orderType: 'Market',
+      quantity: quantity.toString(),
+      triggerPrice: triggerPrice.toString(),
+      triggerQuantity: quantity.toString(),
+      triggerBy: triggerBy || 'MarkPrice',
+      reduceOnly: reduceOnly !== false
+    };
+
+    const signingParams = { ...orderParams };
+    const { signature, timestamp, window, apiKey } = await signRequest(API_INSTRUCTIONS.ORDER_EXECUTE, signingParams);
+
+    const response = await axios.post(`${BACKPACK_API_URL}/api/v1/order`, orderParams, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey,
+        'X-SIGNATURE': signature,
+        'X-TIMESTAMP': timestamp.toString(),
+        'X-WINDOW': window.toString()
+      }
+    });
+
+    return response.data;
+  } catch (error) {
+    console.error('Error placing futures trigger order:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw error;
+  }
+}
+
 module.exports = {
   fetchBackpackBalances,
   fetchCollateralInfo,
@@ -393,6 +446,7 @@ module.exports = {
   getFuturesMarkets,
   getMarketInfo,
   placeFuturesOrder,
+  placeFuturesTriggerOrder,
   fetchOpenPositions,
   fetchOpenOrders,
   cancelOrder,
