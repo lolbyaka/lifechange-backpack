@@ -316,9 +316,9 @@ router.post('/webhook', (req, res) => {
           null,
           {
             takeProfitTriggerPrice: tpTriggerPrice,
-            takeProfitTriggerBy: 'LastPrice',
+            takeProfitTriggerBy: 'MarkPrice',
             stopLossTriggerPrice: slTriggerPrice,
-            stopLossTriggerBy: 'LastPrice'
+            stopLossTriggerBy: 'MarkPrice'
           }
         );
         console.log('[Webhook Auto-Trade] Main order with TP/SL placed successfully:', mainOrderResult);
