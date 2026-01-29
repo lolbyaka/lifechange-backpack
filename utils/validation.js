@@ -6,18 +6,7 @@ const { POSITION_TYPES, ORDER_TYPES, SIDE_MAPPING } = require('../config/constan
  * @returns {string} - Normalized side (Bid or Ask)
  */
 function normalizeSide(position) {
-  if (!position || typeof position !== 'string') {
-    throw new Error(`position is required and must be a string. Received: ${position}`);
-  }
-  
-  const upperPosition = position.toUpperCase();
-  if (upperPosition === POSITION_TYPES.LONG) {
-    return SIDE_MAPPING.LONG; // 'Bid'
-  } else if (upperPosition === POSITION_TYPES.SHORT) {
-    return SIDE_MAPPING.SHORT; // 'Ask'
-  } else {
-    throw new Error(`position must be "${POSITION_TYPES.LONG}" or "${POSITION_TYPES.SHORT}". Received: ${position}`);
-  }
+  return SIDE_MAPPING[position];
 }
 
 /**

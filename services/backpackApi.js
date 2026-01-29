@@ -289,9 +289,10 @@ async function cancelAllOrdersForSymbol(symbol) {
  * @param {string|null} conditionalOrders.stopLossTriggerPrice - SL trigger price
  * @param {string|null} conditionalOrders.stopLossLimitPrice - SL limit price (optional, if not set will be market)
  * @param {string|null} conditionalOrders.stopLossTriggerBy - SL trigger by (LastPrice, MarkPrice, IndexPrice)
+ * @param {boolean} reduceOnly - If true, order can only reduce position (futures). Use for TP/SL to avoid opening opposite.
  * @returns {Promise<object>} - Order response
  */
-async function placeFuturesOrder(symbol, side, orderType, quantity, price = null, conditionalOrders = null) {
+async function placeFuturesOrder(symbol, side, orderType, quantity, price = null, conditionalOrders = null, reduceOnly = false) {
   try {
     // Validate side - API expects "Bid" or "Ask" (not "Buy" or "Sell")
     if (!side || typeof side !== 'string') {
@@ -317,6 +318,11 @@ async function placeFuturesOrder(symbol, side, orderType, quantity, price = null
     // Add price for limit orders
     if (normalizedOrderType === 'Limit' && price) {
       orderParams.price = price.toString();
+    }
+
+    // Reduce-only: order can only close/reduce position, never open opposite (required for TP/SL closing orders)
+    if (reduceOnly) {
+      orderParams.reduceOnly = true;
     }
 
     // Add conditional orders (TP/SL) if provided
