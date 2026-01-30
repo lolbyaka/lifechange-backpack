@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { addAlert, getAlerts } = require('../services/webhookStorage');
 const { getExchange } = require('../services/exchange/factory');
+const { getExchangeId, getBackpackAccountList } = require('../config/exchange');
 const { normalizeSide, roundQuantity, roundPrice } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
@@ -127,11 +128,30 @@ router.post('/webhook', (req, res) => {
   const message = alertData.message;
   const positionSize = alertData.positionSize ? parseFloat(alertData.positionSize) : null;
   const leverage = alertData.leverageSize ? parseInt(alertData.leverageSize) : LEVERAGE;
+  const accountName = alertData.name || alertData.account || null;
   
   if(!positionSize) {
     console.error('[Webhook Auto-Trade] Missing position size in webhook data');
     return;
   }
+
+  // Resolve account for multi-account (Backpack only)
+  const exchangeId = getExchangeId();
+  const backpackAccounts = getBackpackAccountList();
+  const isBackpackMultiAccount = exchangeId === 'backpack' && backpackAccounts.length > 0;
+  if (isBackpackMultiAccount && accountName != null && String(accountName).trim() !== '') {
+    const trimmed = String(accountName).trim();
+    if (!backpackAccounts.includes(trimmed)) {
+      res.status(400).json({
+        error: `Unknown account '${accountName}'. Allowed: ${backpackAccounts.join(', ')}.`
+      });
+      return;
+    }
+  }
+  const effectiveAccount = isBackpackMultiAccount
+    ? (accountName && backpackAccounts.includes(String(accountName).trim()) ? String(accountName).trim() : backpackAccounts[0])
+    : undefined;
+
   // Add alert with timestamp (async, don't wait)
   addAlert(alertData).catch(err => {
     console.error('Error saving webhook to database:', err);
@@ -152,7 +172,7 @@ router.post('/webhook', (req, res) => {
       let entryPrice;
 
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         const tickerData = await exchange.getTicker(futuresSymbol);
         entryPrice = parseFloat(tickerData.lastPrice || tickerData.price || tickerData.close || tickerData.last);
         
@@ -172,7 +192,7 @@ router.post('/webhook', (req, res) => {
       let stepSize = null;
       let tickSize = null;
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         const marketInfo = await exchange.getMarketInfo(futuresSymbol);
         stepSize = marketInfo?.filters?.quantity?.stepSize || null;
         tickSize = marketInfo?.filters?.price?.tickSize || null;
@@ -196,7 +216,7 @@ router.post('/webhook', (req, res) => {
       // Check for existing positions before placing order
       let existingPosition = null;
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         const positions = await exchange.fetchPositions();
         existingPosition = findExistingPosition(positions, futuresSymbol);
         
@@ -218,7 +238,7 @@ router.post('/webhook', (req, res) => {
           if (isOppositePosition(existingPosition, direction)) {            
             try {
               console.log('[Webhook Auto-Trade] Cancelling existing TP/SL orders...');
-              const exchange = getExchange();
+              const exchange = getExchange(effectiveAccount);
               await exchange.cancelAllOrders(futuresSymbol);
               console.log('[Webhook Auto-Trade] Successfully cancelled TP/SL orders');
             } catch (cancelError) {
@@ -241,7 +261,7 @@ router.post('/webhook', (req, res) => {
               let closeStepSize = stepSize;
               if (!closeStepSize) {
                 try {
-                  const exchange = getExchange();
+                  const exchange = getExchange(effectiveAccount);
                   const marketInfo = await exchange.getMarketInfo(futuresSymbol);
                   closeStepSize = marketInfo?.filters?.quantity?.stepSize || null;
                 } catch (e) {
@@ -251,7 +271,7 @@ router.post('/webhook', (req, res) => {
               
               const roundedCloseQuantity = roundQuantity(existingSize, closeStepSize);
               
-              const exchange = getExchange();
+              const exchange = getExchange(effectiveAccount);
               const closeOrderResult = await exchange.placeOrder(
                 futuresSymbol,
                 closeSide,
@@ -267,7 +287,7 @@ router.post('/webhook', (req, res) => {
               
               // Verify position is closed (optional)
               try {
-                const exchange = getExchange();
+                const exchange = getExchange(effectiveAccount);
                 const updatedPositions = await exchange.fetchPositions();
                 const stillOpen = findExistingPosition(updatedPositions, futuresSymbol);
                 if (stillOpen) {
@@ -304,7 +324,7 @@ router.post('/webhook', (req, res) => {
 
       let mainOrderResult;
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         mainOrderResult = await exchange.placeOrder(
           futuresSymbol,
           side,
@@ -328,7 +348,7 @@ router.post('/webhook', (req, res) => {
       for (const delayMs of positionRetryDelays) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
         try {
-          const exchange = getExchange();
+          const exchange = getExchange(effectiveAccount);
           const positions = await exchange.fetchPositions();
           openedPosition = findExistingPosition(positions, futuresSymbol);
           if (openedPosition) break;
@@ -376,7 +396,7 @@ router.post('/webhook', (req, res) => {
       });
 
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         await exchange.placeTriggerOrder(
           futuresSymbol,
           closeSide,
@@ -393,7 +413,7 @@ router.post('/webhook', (req, res) => {
       }
 
       try {
-        const exchange = getExchange();
+        const exchange = getExchange(effectiveAccount);
         await exchange.placeTriggerOrder(
           futuresSymbol,
           closeSide,
