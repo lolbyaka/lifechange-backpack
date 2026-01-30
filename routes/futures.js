@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { getFuturesMarkets, getFuturesTicker, getMarketInfo, placeFuturesOrder, fetchOpenPositions } = require('../services/backpackApi');
-const { validateFuturesOrder, normalizeSide, roundQuantity } = require('../utils/validation');
+const { getExchange } = require('../services/exchange/factory');
+const { validateFuturesOrder, normalizeSide, roundQuantity, toCanonicalSymbol } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
 
@@ -11,7 +11,8 @@ const Operation = require('../models/Operation');
  */
 router.get('/api/futures/tickers', async (req, res) => {
   try {
-    const markets = await getFuturesMarkets();
+    const exchange = getExchange();
+    const markets = await exchange.getMarkets();
     
     // Format futures markets
     // Extract base symbol from futures symbol (e.g., ETH_USDC_PERP -> ETH)
@@ -48,13 +49,8 @@ router.post('/api/futures/order', async (req, res) => {
     // Validate and normalize input
     const { ticker, position, leverage, quantity: inputQuantity } = validateFuturesOrder(req.body);
     
-    // Convert ticker to futures symbol format
-    // If user provides full symbol (e.g., BNB_USDC_PERP), use it as is
-    // Otherwise, add _USDC_PERP suffix (e.g., BNB -> BNB_USDC_PERP)
-    let futuresSymbol = ticker;
-    if (!futuresSymbol.includes('_USDC_PERP') && !futuresSymbol.includes('_USDT_PERP')) {
-      futuresSymbol = `${futuresSymbol}_USDC_PERP`;
-    }
+    // Convert ticker to canonical futures symbol (e.g. BNB -> BNB_USDC_PERP)
+    const futuresSymbol = toCanonicalSymbol(ticker, 'USDC');
     
     // Convert position to side: LONG = Bid (buy), SHORT = Ask (sell)
     const side = normalizeSide(position);
@@ -63,8 +59,9 @@ router.post('/api/futures/order', async (req, res) => {
     let currentPrice;
     let stepSize = null;
     try {
+      const exchange = getExchange();
       // Get ticker price (for display/calculation purposes)
-      const tickerData = await getFuturesTicker(futuresSymbol);
+      const tickerData = await exchange.getTicker(futuresSymbol);
       // Ticker response format may vary, try common fields
       currentPrice = parseFloat(tickerData.lastPrice || tickerData.price || tickerData.close || tickerData.last || tickerData.lastPrice);
       
@@ -75,7 +72,7 @@ router.post('/api/futures/order', async (req, res) => {
       
       // Get market info to determine stepSize for quantity precision
       try {
-        const marketInfo = await getMarketInfo(futuresSymbol);
+        const marketInfo = await exchange.getMarketInfo(futuresSymbol);
         stepSize = marketInfo?.filters?.quantity?.stepSize || null;
         console.log('Market stepSize:', stepSize);
       } catch (marketError) {
@@ -116,7 +113,8 @@ router.post('/api/futures/order', async (req, res) => {
     // Place the market order
     let orderResult;
     try {
-      orderResult = await placeFuturesOrder(
+      const exchange = getExchange();
+      orderResult = await exchange.placeOrder(
         futuresSymbol,
         side,
         ORDER_TYPES.MARKET,
@@ -196,11 +194,12 @@ router.post('/api/futures/order', async (req, res) => {
 
 /**
  * GET /api/futures/positions
- * Get all open positions from Backpack Exchange
+ * Get all open positions from configured exchange
  */
 router.get('/api/futures/positions', async (req, res) => {
   try {
-    const positions = await fetchOpenPositions();
+    const exchange = getExchange();
+    const positions = await exchange.fetchPositions();
     
     // Transform API response to match frontend expectations
     // API returns: { symbol, netQuantity, entryPrice, markPrice, pnlUnrealized, netExposureNotional, ... }

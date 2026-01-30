@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { addAlert, getAlerts } = require('../services/webhookStorage');
-const { getFuturesTicker, getMarketInfo, placeFuturesOrder, placeFuturesTriggerOrder, fetchOpenPositions, fetchOpenOrders, cancelAllOrdersForSymbol } = require('../services/backpackApi');
+const { getExchange } = require('../services/exchange/factory');
 const { normalizeSide, roundQuantity, roundPrice } = require('../utils/validation');
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
@@ -39,8 +39,9 @@ function determineDirection(message) {
  * @returns {object|null} - Existing position or null
  */
 function findExistingPosition(positions, symbol) {
+  console.log('findExistingPosition', positions, symbol);
   return positions.find(p => {
-    const posSymbol = p.symbol || p.market;
+    const posSymbol = p.market || p.symbol;
     const netQuantity = parseFloat(p.netQuantity || p.netExposureQuantity || 0);
     return posSymbol === symbol && Math.abs(netQuantity) > 0;
   });
@@ -151,7 +152,8 @@ router.post('/webhook', (req, res) => {
       let entryPrice;
 
       try {
-        const tickerData = await getFuturesTicker(futuresSymbol);
+        const exchange = getExchange();
+        const tickerData = await exchange.getTicker(futuresSymbol);
         entryPrice = parseFloat(tickerData.lastPrice || tickerData.price || tickerData.close || tickerData.last);
         
         if (!entryPrice || isNaN(entryPrice) || entryPrice <= 0) {
@@ -170,7 +172,8 @@ router.post('/webhook', (req, res) => {
       let stepSize = null;
       let tickSize = null;
       try {
-        const marketInfo = await getMarketInfo(futuresSymbol);
+        const exchange = getExchange();
+        const marketInfo = await exchange.getMarketInfo(futuresSymbol);
         stepSize = marketInfo?.filters?.quantity?.stepSize || null;
         tickSize = marketInfo?.filters?.price?.tickSize || null;
         console.log('[Webhook Auto-Trade] Market stepSize:', stepSize, 'tickSize:', tickSize);
@@ -193,7 +196,8 @@ router.post('/webhook', (req, res) => {
       // Check for existing positions before placing order
       let existingPosition = null;
       try {
-        const positions = await fetchOpenPositions();
+        const exchange = getExchange();
+        const positions = await exchange.fetchPositions();
         existingPosition = findExistingPosition(positions, futuresSymbol);
         
         if (existingPosition) {
@@ -214,7 +218,8 @@ router.post('/webhook', (req, res) => {
           if (isOppositePosition(existingPosition, direction)) {            
             try {
               console.log('[Webhook Auto-Trade] Cancelling existing TP/SL orders...');
-              await cancelAllOrdersForSymbol(futuresSymbol);
+              const exchange = getExchange();
+              await exchange.cancelAllOrders(futuresSymbol);
               console.log('[Webhook Auto-Trade] Successfully cancelled TP/SL orders');
             } catch (cancelError) {
               console.error('[Webhook Auto-Trade] Failed to cancel TP/SL orders:', cancelError.message);
@@ -236,7 +241,8 @@ router.post('/webhook', (req, res) => {
               let closeStepSize = stepSize;
               if (!closeStepSize) {
                 try {
-                  const marketInfo = await getMarketInfo(futuresSymbol);
+                  const exchange = getExchange();
+                  const marketInfo = await exchange.getMarketInfo(futuresSymbol);
                   closeStepSize = marketInfo?.filters?.quantity?.stepSize || null;
                 } catch (e) {
                   // Use existing stepSize or default
@@ -245,7 +251,8 @@ router.post('/webhook', (req, res) => {
               
               const roundedCloseQuantity = roundQuantity(existingSize, closeStepSize);
               
-              const closeOrderResult = await placeFuturesOrder(
+              const exchange = getExchange();
+              const closeOrderResult = await exchange.placeOrder(
                 futuresSymbol,
                 closeSide,
                 ORDER_TYPES.MARKET,
@@ -260,7 +267,8 @@ router.post('/webhook', (req, res) => {
               
               // Verify position is closed (optional)
               try {
-                const updatedPositions = await fetchOpenPositions();
+                const exchange = getExchange();
+                const updatedPositions = await exchange.fetchPositions();
                 const stillOpen = findExistingPosition(updatedPositions, futuresSymbol);
                 if (stillOpen) {
                   const stillOpenSize = Math.abs(parseFloat(stillOpen.netQuantity || stillOpen.netExposureQuantity || 0));
@@ -296,7 +304,8 @@ router.post('/webhook', (req, res) => {
 
       let mainOrderResult;
       try {
-        mainOrderResult = await placeFuturesOrder(
+        const exchange = getExchange();
+        mainOrderResult = await exchange.placeOrder(
           futuresSymbol,
           side,
           ORDER_TYPES.MARKET,
@@ -313,18 +322,22 @@ router.post('/webhook', (req, res) => {
       }
 
       // Step 2: Wait for position to be reflected, then get REAL entry price from position
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      let openedPosition;
-      try {
-        const positions = await fetchOpenPositions();
-        openedPosition = findExistingPosition(positions, futuresSymbol);
-        if (!openedPosition) {
-          console.error('[Webhook Auto-Trade] Could not find opened position for', futuresSymbol);
-          return;
+      // Retry a few times (some exchanges e.g. Hyperliquid can take a moment to update)
+      const positionRetryDelays = [800, 1500, 2500];
+      let openedPosition = null;
+      for (const delayMs of positionRetryDelays) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        try {
+          const exchange = getExchange();
+          const positions = await exchange.fetchPositions();
+          openedPosition = findExistingPosition(positions, futuresSymbol);
+          if (openedPosition) break;
+        } catch (posError) {
+          console.warn('[Webhook Auto-Trade] Fetch positions attempt failed:', posError.message);
         }
-      } catch (posError) {
-        console.error('[Webhook Auto-Trade] Failed to fetch position details:', posError.message);
+      }
+      if (!openedPosition) {
+        console.error('[Webhook Auto-Trade] Could not find opened position for', futuresSymbol);
         return;
       }
 
@@ -363,13 +376,15 @@ router.post('/webhook', (req, res) => {
       });
 
       try {
-        await placeFuturesTriggerOrder(
+        const exchange = getExchange();
+        await exchange.placeTriggerOrder(
           futuresSymbol,
           closeSide,
           roundedPositionSize,
           tpTriggerPrice,
           'MarkPrice',
-          true
+          true,
+          true // isTakeProfit – so exchange uses TP trigger (e.g. Hyperliquid tpsl: 'tp')
         );
         console.log('[Webhook Auto-Trade] Take-profit conditional order placed');
       } catch (tpError) {
@@ -378,13 +393,15 @@ router.post('/webhook', (req, res) => {
       }
 
       try {
-        await placeFuturesTriggerOrder(
+        const exchange = getExchange();
+        await exchange.placeTriggerOrder(
           futuresSymbol,
           closeSide,
           roundedPositionSize,
           slTriggerPrice,
           'MarkPrice',
-          true
+          true,
+          false // isTakeProfit = false for stop-loss
         );
         console.log('[Webhook Auto-Trade] Stop-loss conditional order placed');
       } catch (slError) {

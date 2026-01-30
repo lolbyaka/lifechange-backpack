@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { PORT } = require('./config/constants');
 const { connectDB } = require('./config/database');
+const { initExchange } = require('./services/exchange/factory');
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -23,7 +24,10 @@ async function startServer() {
   try {
     // Connect to MongoDB
     await connectDB();
-    
+
+    // Init exchange and preload markets (CCXT) so first webhook isn't slow
+    await initExchange();
+
     // Start Express server
     app.listen(PORT, () => {
       console.log(`Server is running on http://localhost:${PORT}`);

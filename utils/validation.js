@@ -1,6 +1,21 @@
 const { POSITION_TYPES, ORDER_TYPES, SIDE_MAPPING } = require('../config/constants');
 
 /**
+ * Convert ticker or symbol to canonical futures symbol (e.g. ETH -> ETH_USDC_PERP).
+ * Used by routes and adapters so the app always uses one format.
+ * @param {string} ticker - Base symbol (e.g. ETH) or full symbol (e.g. ETH_USDC_PERP)
+ * @param {string} quote - Quote/settle currency (default USDC)
+ * @returns {string} - Canonical symbol (BASE_QUOTE_PERP)
+ */
+function toCanonicalSymbol(ticker, quote = 'USDC') {
+  if (!ticker || typeof ticker !== 'string') return ticker;
+  const t = ticker.trim().toUpperCase();
+  if (t.includes('_USDC_PERP') || t.includes('_USDT_PERP')) return t;
+  if (t.includes('_') && t.endsWith('_PERP')) return t;
+  return `${t}_${quote}_PERP`;
+}
+
+/**
  * Normalize side value (LONG/SHORT to Bid/Ask)
  * @param {string} position - Position type (LONG or SHORT)
  * @returns {string} - Normalized side (Bid or Ask)
@@ -125,6 +140,7 @@ function validateFuturesOrder({ ticker, position, leverage, quantity }) {
 }
 
 module.exports = {
+  toCanonicalSymbol,
   normalizeSide,
   normalizeOrderType,
   roundQuantity,

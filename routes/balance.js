@@ -1,15 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { fetchBackpackBalances, fetchCollateralInfo } = require('../services/backpackApi');
+const { getExchange } = require('../services/exchange/factory');
 
 /**
  * GET /api/balance
- * Fetch account balance from Backpack Exchange
+ * Fetch account balance from configured exchange
  */
 router.get('/api/balance', async (req, res) => {
   try {
-    // Fetch balances from Backpack Exchange API
-    const balances = await fetchBackpackBalances();
+    const exchange = getExchange();
+    const balances = await exchange.fetchBalance();
     
     // Calculate total USDC balance (or USD equivalent)
     // The API returns balances in format: { "USDC": { available: "...", locked: "...", staked: "..." }, ... }
@@ -43,7 +43,7 @@ router.get('/api/balance', async (req, res) => {
     // Try to get collateral/margin info for available margin
     let availableMargin = null;
     try {
-      const collateralInfo = await fetchCollateralInfo();
+      const collateralInfo = await exchange.fetchCollateralInfo();
       availableMargin = parseFloat(collateralInfo.netEquityAvailable || '0');
     } catch (marginError) {
       console.warn('Could not fetch margin info:', marginError.message);
@@ -59,7 +59,7 @@ router.get('/api/balance', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/balance:', error);
     res.status(500).json({
-      error: 'Failed to fetch balance from Backpack Exchange',
+      error: 'Failed to fetch balance from exchange',
       message: error.message,
       // Fallback to mock data if API fails (remove in production)
       balance: Math.floor(Math.random() * 9000 + 1000).toString(),
