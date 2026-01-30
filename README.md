@@ -1,6 +1,6 @@
 # Lifechange Dev - Exchange Balance & Futures API
 
-A simple Express server that fetches account balances and places futures orders. It supports multiple exchanges via a unified adapter layer: **Backpack** (custom) and **CCXT-based** exchanges (e.g. Binance, Bybit). You choose the exchange with the `EXCHANGE` env var.
+A simple Express server that fetches account balances and places futures orders. All supported exchanges (Backpack, Binance, Bybit, Hyperliquid, etc.) use **CCXT**. You choose the exchange with the `EXCHANGE` env var.
 
 ## Setup
 
@@ -35,7 +35,7 @@ Create a `.env` file in the root directory.
 
 **Exchange selection:** set `EXCHANGE` to the exchange you want to use. Supported values: `backpack`, `binance`, `bybit`, `okx`, `kraken`, `hyperliquid`. Default is `backpack`.
 
-**Backpack (default):**
+**Backpack (CCXT, default):**
 
 ```env
 EXCHANGE=backpack
@@ -186,10 +186,7 @@ If the configured exchange API is unavailable or credentials are missing, the `/
 
 ## Exchange abstraction
 
-The app uses a unified exchange interface so you can switch exchanges by changing `EXCHANGE` and env vars:
-
-- **Backpack**: Custom adapter (Backpack is not in CCXT); uses existing Backpack API and Ed25519 signing.
-- **CCXT exchanges**: Binance, Bybit, OKX, Kraken, etc. use the CCXT library; symbols and responses are normalized to a single format (e.g. canonical symbol `ETH_USDC_PERP`).
+All exchanges (Backpack, Binance, Bybit, OKX, Kraken, Hyperliquid) use **CCXT**. The app normalizes symbols and responses to a single format (e.g. canonical symbol `ETH_USDC_PERP`). Switch exchanges by changing `EXCHANGE` and the corresponding env vars.
 
 ## Documentation
 

@@ -1,16 +1,16 @@
 /**
  * Exchange factory. Returns the appropriate adapter instance based on EXCHANGE env var.
- * Only the factory and adapters are used by routes; backpackApi is used only by the Backpack adapter.
+ * All exchanges (including Backpack) use the CCXT adapter.
  */
 
 const { getExchangeId, getExchangeConfig, getCredentials } = require('../../config/exchange');
-const backpackAdapter = require('./backpackAdapter');
 const { createCcxtAdapter } = require('./ccxtAdapter');
 
 let cachedAdapter = null;
 
 /**
  * Get the configured exchange adapter (singleton per process).
+ * All exchanges (Backpack, Binance, Bybit, etc.) use the CCXT adapter.
  * @returns {object} Adapter implementing the unified interface
  * @throws {Error} If EXCHANGE is unsupported or credentials are missing
  */
@@ -20,11 +20,6 @@ function getExchange() {
   }
   const exchangeId = getExchangeId();
   const config = getExchangeConfig(exchangeId);
-
-  if (config.adapter === 'backpack') {
-    cachedAdapter = backpackAdapter;
-    return cachedAdapter;
-  }
 
   if (config.adapter === 'ccxt') {
     const credentials = getCredentials(exchangeId);

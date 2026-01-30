@@ -56,6 +56,8 @@ function createCcxtExchange(exchangeId, credentials, options = {}) {
   }
   // Hyperliquid uses walletAddress + privateKey instead of apiKey/secret
   const isHyperliquid = exchangeId === 'hyperliquid';
+  // Backpack uses 'swap' for perpetuals; others use 'future'
+  const defaultType = exchangeId === 'backpack' ? 'swap' : 'future';
   const config = isHyperliquid
     ? {
         walletAddress: credentials.apiKey,
@@ -71,7 +73,7 @@ function createCcxtExchange(exchangeId, credentials, options = {}) {
         secret: credentials.secret,
         enableRateLimit: true,
         options: {
-          defaultType: 'future',
+          defaultType,
           ...(options.exchangeOptions || {})
         }
       };
@@ -293,8 +295,11 @@ function createCcxtAdapter(exchangeId, credentials, options = {}) {
     const params = {
       reduceOnly: reduceOnly !== false
     };
-    // Hyperliquid (and some others) require takeProfitPrice vs stopLossPrice so trigger direction is correct
-    if (exchangeId === 'hyperliquid') {
+    // Backpack: use triggerPrice so CCXT sets request.triggerPrice + request.triggerQuantity (Backpack API shape).
+    // Passing takeProfitPrice/stopLossPrice would get merged into body and cause "Invalid signature".
+    if (exchangeId === 'backpack') {
+      params.triggerPrice = triggerPrice;
+    } else if (exchangeId === 'hyperliquid') {
       if (isTakeProfit) {
         params.takeProfitPrice = triggerPrice;
       } else {

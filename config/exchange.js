@@ -8,7 +8,7 @@ const EXCHANGE_ENV = {
   backpack: {
     apiKey: 'BACKPACK_API_KEY',
     secret: 'BACKPACK_SECRET_KEY',
-    adapter: 'backpack'
+    adapter: 'ccxt'
   },
   binance: {
     apiKey: 'BINANCE_APIKEY',
