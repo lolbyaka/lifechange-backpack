@@ -126,6 +126,8 @@ router.post('/webhook', (req, res) => {
   // Extract trading parameters from webhook data
   const futuresSymbol = alertData.symbol;
   const message = alertData.message;
+  const alertSL_ROI_PERCENT = alertData.slROI ? parseFloat(alertData.slROI) : SL_ROI_PERCENT;
+  const alertTP_ROI_PERCENT = alertData.tpROI ? parseFloat(alertData.tpROI) : TP_ROI_PERCENT;
   const positionSize = alertData.positionSize ? parseFloat(alertData.positionSize) : null;
   const leverage = alertData.leverageSize ? parseInt(alertData.leverageSize) : LEVERAGE;
   const accountName = alertData.name || alertData.account || null;
@@ -375,11 +377,11 @@ router.post('/webhook', (req, res) => {
       // SHORT: TP = Entry × (1 − TP_ROI/(100×Leverage)), SL = Entry × (1 + SL_ROI/(100×Leverage))
       let tpTriggerPrice, slTriggerPrice;
       if (direction === 'LONG') {
-        tpTriggerPrice = realEntryPrice * (1 + TP_ROI_PERCENT / (100 * leverage));
-        slTriggerPrice = realEntryPrice * (1 - SL_ROI_PERCENT / (100 * leverage));
+        tpTriggerPrice = realEntryPrice * (1 + alertTP_ROI_PERCENT / (100 * leverage));
+        slTriggerPrice = realEntryPrice * (1 - alertSL_ROI_PERCENT / (100 * leverage));
       } else {
-        tpTriggerPrice = realEntryPrice * (1 - TP_ROI_PERCENT / (100 * leverage));
-        slTriggerPrice = realEntryPrice * (1 + SL_ROI_PERCENT / (100 * leverage));
+        tpTriggerPrice = realEntryPrice * (1 - alertTP_ROI_PERCENT / (100 * leverage));
+        slTriggerPrice = realEntryPrice * (1 + alertSL_ROI_PERCENT / (100 * leverage));
       }
       tpTriggerPrice = roundPrice(tpTriggerPrice, tickSize);
       slTriggerPrice = roundPrice(slTriggerPrice, tickSize);
