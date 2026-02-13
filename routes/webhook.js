@@ -125,17 +125,40 @@ router.post('/webhook', (req, res) => {
   
   // Extract trading parameters from webhook data
   const futuresSymbol = alertData.symbol;
-  const message = alertData.message;
+  // const message = alertData.message;
   const alertSL_ROI_PERCENT = alertData.slROI ? parseFloat(alertData.slROI) : SL_ROI_PERCENT;
   const alertTP_ROI_PERCENT = alertData.tpROI ? parseFloat(alertData.tpROI) : TP_ROI_PERCENT;
+  const longMALine = alertData.longMALine ? parseFloat(alertData.longMALine) : null;
+  const crossMASignal = alertData.crossMASignal ? parseFloat(alertData.crossMASignal) : null;
+  const momentumLine = alertData.momentumLine ? parseFloat(alertData.momentumLine) : null;
+  const MALine = alertData.MALine ? parseFloat(alertData.MALine) : null;
   const positionSize = alertData.positionSize ? parseFloat(alertData.positionSize) : null;
   const leverage = alertData.leverageSize ? parseInt(alertData.leverageSize) : LEVERAGE;
   const accountName = alertData.name || alertData.account || null;
+
+  if(!longMALine || !crossMASignal || !momentumLine || !MALine) {
+    console.error('[Webhook Auto-Trade] Missing long MALine or cross MASignal in webhook data');
+    return;
+  }
+
+  console.log('longMALine', longMALine);
+  console.log('crossMASignal', crossMASignal);
+  console.log('momentumLine', momentumLine);
+  console.log('MALine', MALine);
+
+  let message = null;
+
+  if(Number(momentumLine) > Number(longMALine) && crossMASignal === 1) {
+    message = 'LONG';
+  } else if(Number(momentumLine) < Number(longMALine) && crossMASignal === 1) {
+    message = 'SHORT';
+  }
   
   if(!positionSize) {
     console.error('[Webhook Auto-Trade] Missing position size in webhook data');
     return;
   }
+
 
   // Resolve account for multi-account (Backpack only)
   const exchangeId = getExchangeId();
