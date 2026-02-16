@@ -7,6 +7,15 @@ const { normalizeSide, roundQuantity, roundPrice } = require('../utils/validatio
 const { ORDER_TYPES } = require('../config/constants');
 const Operation = require('../models/Operation');
 
+const webhookTypes = {
+  SIGNAL: 'signal',
+  LINE_CHANGE: 'lineChange'
+}
+const lastDirectionByTicker = {
+
+}
+
+const momentumLineByTicker = {}
 // Constants for auto-trading
 const LEVERAGE = 20;
 // ROI-based TP/SL (e.g. 20 = 20% ROI for TP, 10 = 10% ROI for SL)
@@ -124,33 +133,36 @@ router.post('/webhook', (req, res) => {
   console.log('Received webhook:', alertData);
   
   // Extract trading parameters from webhook data
+  const webhookType = alertData.webhookType || webhookTypes.SIGNAL;
   const futuresSymbol = alertData.symbol;
   // const message = alertData.message;
   const alertSL_ROI_PERCENT = alertData.slROI ? parseFloat(alertData.slROI) : SL_ROI_PERCENT;
   const alertTP_ROI_PERCENT = alertData.tpROI ? parseFloat(alertData.tpROI) : TP_ROI_PERCENT;
   const longMALine = alertData.longMALine ? parseFloat(alertData.longMALine) : null;
-  const crossMASignal = alertData.crossMASignal ? parseFloat(alertData.crossMASignal) : null;
+  const crossMASignalDown = alertData.crossMASignalDown ? parseFloat(alertData.crossMASignalDown) : null;
+  const crossMASignalUp = alertData.crossMASignalUp ? parseFloat(alertData.crossMASignalUp) : null;
   const momentumLine = alertData.momentumLine ? parseFloat(alertData.momentumLine) : null;
   const MALine = alertData.MALine ? parseFloat(alertData.MALine) : null;
   const positionSize = alertData.positionSize ? parseFloat(alertData.positionSize) : null;
   const leverage = alertData.leverageSize ? parseInt(alertData.leverageSize) : LEVERAGE;
   const accountName = alertData.name || alertData.account || null;
 
-  if(!longMALine || !crossMASignal || !momentumLine || !MALine) {
+  if(!longMALine || !crossMASignalDown || !crossMASignalUp || !momentumLine || !MALine) {
     console.error('[Webhook Auto-Trade] Missing long MALine or cross MASignal in webhook data');
     return;
   }
 
   console.log('longMALine', longMALine);
-  console.log('crossMASignal', crossMASignal);
+  console.log('crossMASignalDown', crossMASignalDown);
+  console.log('crossMASignalUp', crossMASignalUp);
   console.log('momentumLine', momentumLine);
   console.log('MALine', MALine);
 
   let message = null;
 
-  if(Number(momentumLine) > Number(longMALine) && crossMASignal === 1) {
+  if(Number(momentumLine) > Number(longMALine) && crossMASignalUp === 1) {
     message = 'LONG';
-  } else if(Number(momentumLine) < Number(longMALine) && crossMASignal === 1) {
+  } else if(Number(momentumLine) < Number(longMALine) && crossMASignalDown === 1) {
     message = 'SHORT';
   }
   
@@ -244,6 +256,10 @@ router.post('/webhook', (req, res) => {
         const exchange = getExchange(effectiveAccount);
         const positions = await exchange.fetchPositions();
         existingPosition = findExistingPosition(positions, futuresSymbol);
+
+        if(lastDirectionByTicker[futuresSymbol] === direction) {
+          return;
+        }
         
         if (existingPosition) {
           const existingSide = getPositionSide(existingPosition);
@@ -358,6 +374,7 @@ router.post('/webhook', (req, res) => {
           null
         );
         console.log('[Webhook Auto-Trade] Position opened successfully:', mainOrderResult);
+        lastDirectionByTicker[futuresSymbol] = direction;
       } catch (mainOrderError) {
         console.error('[Webhook Auto-Trade] Failed to place main order:', mainOrderError.message);
         if (mainOrderError.response) {
